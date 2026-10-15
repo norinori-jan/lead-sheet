@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14121f"><meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="icon.svg">
+<title>lead-sheet</title>
+<style>
+:root{--bg:#14121f;--p:#1d1a2e;--p2:#28243f;--bd:#3a3560;--tx:#f0eefc;--dim:#a29fc2;--acc:#a29bfe;--gold:#F5C842;--grn:#4AE09A;--red:#FF6B6B}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,"Hiragino Sans",sans-serif;font-size:16px}
+body{padding:env(safe-area-inset-top) 12px calc(30px + env(safe-area-inset-bottom));max-width:900px;margin:0 auto}
+header{display:flex;align-items:center;gap:8px;padding:12px 0 8px}header b{font-size:18px;flex:1}
+button,select{font:inherit;color:var(--tx);background:var(--p2);border:1px solid var(--bd);border-radius:12px;padding:10px 13px;min-height:44px}
+button:active{filter:brightness(1.3)}button.pri{background:var(--acc);border-color:var(--acc);color:#1a1530;font-weight:800}button.sm{min-height:38px;padding:7px 11px;font-size:14px}
+.card{background:var(--p);border:1px solid var(--bd);border-radius:14px;padding:12px;margin-bottom:12px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+h4{margin:0 0 8px;font-size:13px;color:var(--dim)}
+input[type=text],textarea{width:100%;font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:11px;outline:none}
+textarea{min-height:110px;font-family:ui-monospace,Menlo,monospace;font-size:14px}
+#paper{background:#fff;border-radius:6px;padding:10px 6px;overflow:hidden}
+#paper svg{display:block;width:100%;height:auto}
+#msg{font-size:13px;min-height:20px;margin:4px 2px;color:var(--dim);line-height:1.6}#msg.ok{color:var(--grn)}#msg.er{color:var(--red)}
+[hidden]{display:none!important}
+#printArea{display:none}
+.recent button{margin:0 6px 6px 0}
+@media print{
+  @page{margin:12mm}
+  body{background:#fff;padding:0}body>*:not(#printArea){display:none!important}
+  #printArea{display:block!important}#printArea svg{width:100%;height:auto}
+}
+</style></head><body>
+<header><b>🎼 lead-sheet</b><button class="sm" id="bHelp">使い方</button></header>
+
+<div id="help" class="card" hidden style="font-size:13px;line-height:1.8;color:var(--dim)">
+<b style="color:var(--tx)">楽譜を打ち出して共有する</b><br>
+① 曲を入れる：music-suite のJSONを「ファイル／貼り付け」、または「コードだけ入力」<br>
+② 下に楽譜（メロディ＋コード名）が出ます。移調（キー変更）もできます<br>
+③ 出す：🖨 PDF（印刷→「PDFを保存」）／🖼 画像／🎹 MusicXML（MuseScore等で開く）／🔗 共有リンク<br>
+※ iPhoneで PDF にするには「🖨」→ 共有ボタン →「プリント」→ 画面をピンチして拡大 → 共有 → ファイルに保存
+</div>
+
+<div class="card">
+  <h4>① 曲を入れる</h4>
+  <div class="row"><button class="pri" id="bFile">📂 ファイル</button><button id="bPaste">📋 貼り付け</button><button id="bChords">🎸 コードだけ入力</button><button id="bDemo">♪ サンプル</button></div>
+  <input type="file" id="fFile" accept=".json,application/json" hidden>
+  <div id="inBox" hidden style="margin-top:10px"><textarea id="inTa" spellcheck="false"></textarea><div class="row" style="margin-top:8px"><button class="pri sm" id="inOk">楽譜にする</button><button class="sm" id="inX">閉じる</button></div><div id="inHint" style="font-size:12px;color:var(--dim);margin-top:6px;line-height:1.6"></div></div>
+  <div class="recent" id="recent" style="margin-top:10px"></div>
+</div>
+
+<div id="msg"></div>
+<div class="card" id="songCard" hidden>
+  <input type="text" id="title" placeholder="曲名">
+  <div class="row" style="margin-top:10px">
+    <span style="font-size:13px;color:var(--dim)">キー移調</span><button class="sm" id="tDn">♭ −1</button><span id="tVal" style="min-width:48px;text-align:center;font-weight:700">0</span><button class="sm" id="tUp">♯ +1</button><button class="sm" id="tRst">戻す</button>
+    <span id="keyInfo" style="font-size:13px;color:var(--gold);margin-left:auto"></span>
+  </div>
+</div>
+<div id="paper" hidden></div>
+<div class="card" id="outCard" hidden style="margin-top:12px">
+  <h4>② 打ち出す・共有する</h4>
+  <div class="row"><button class="pri" id="oPrint">🖨 PDF・印刷</button><button id="oPng">🖼 画像で保存</button><button id="oXml">🎹 MusicXML</button><button id="oLink">🔗 共有リンク</button><button id="oJson">{ } JSON</button></div>
+</div>
+<div id="printArea"></div>
+
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function say(m,c){const e=$('msg');e.textContent=m||'';e.className=c||''}
+// ===================== 曲データの読み取り =====================
+let SONG=null,SRC=null,TR=0; // SONG=正規化した曲 / SRC=元のJSON / TR=移調
+const LS_R='ls_recent_v1',LS_LAST='ls_last_v1';
+function parseTS(ts){if(ts==null||ts==='')return{n:4,d:4,bpb:4};if(typeof ts==='number')return{n:ts,d:4,bpb:ts};const m=String(ts).match(/(\d+)\s*\/\s*(\d+)/);if(m){const n=+m[1],d=+m[2];return{n,d,bpb:n*4/d}}const k=parseFloat(ts);return k?{n:k,d:4,bpb:k}:{n:4,d:4,bpb:4}}
+function normalize(j){
+  if(Array.isArray(j))j={source:'vocal-lab',melody:{notes:j}};
+  if(!j||typeof j!=='object')throw new Error('曲のデータではありません');
+  const mel=(((j.melody&&j.melody.notes)||(Array.isArray(j.melody)?j.melody:null)||j.notes||[])).map(n=>({p:n.pitch!=null?n.pitch:(n.midiR!=null?n.midiR:n.midi),t:n.startBeat!=null?n.startBeat:(n.start!=null?n.start:n.beat),d:n.durationBeats!=null?n.durationBeats:(n.dur!=null?n.dur:(n.beats!=null?n.beats:n.duration))})).filter(n=>typeof n.p==='number'&&typeof n.t==='number'&&typeof n.d==='number'&&n.d>0);
+  const secs=[];let cb=0;
+  const cs=(j.chords&&j.chords.sections)||[];
+  cs.forEach(s=>{const start=cb;const list=[];(s.progression||[]).forEach(c=>{const name=c.chord||c.name;if(!name)return;list.push({name:String(name),t:cb,d:+c.beats||4});cb+=(+c.beats||4)});secs.push({tag:s.tag||s.name||'',start,chords:list})});
+  const ts=parseTS(j.timeSig||j.timeSignature);
+  return{name:j.name||j.title||'Untitled',bpm:+j.bpm||120,key:String(j.key||(j.chords&&j.chords.key)||'C'),ts,mel,secs,chordBeats:cb}}
+function songFromChordText(txt,key,bpb){
+  const lines=String(txt).split(/\n+/).map(l=>l.trim()).filter(Boolean);let name='コード譜';const secs=[];let cur=null;
+  lines.forEach(l=>{let m;
+    if((m=l.match(/^(?:key|キー)\s*[:：]\s*(.+)$/i))){key=m[1].trim();return}
+    if((m=l.match(/^(?:title|曲名|タイトル)\s*[:：]\s*(.+)$/i))){name=m[1].trim();return}
+    let tag='';if((m=l.match(/^([^\s|:：]{1,12})\s*[:：]\s*(.*)$/))){tag=m[1];l=m[2]}
+    if(tag||!cur){cur={tag:tag,progression:[]};secs.push(cur)}
+    l.split('|').forEach(b=>{const cs=b.trim().split(/[\s,、]+/).filter(Boolean);cs.forEach(c=>cur.progression.push({chord:c,beats:bpb/cs.length}))})});
+  const ok=secs.filter(s=>s.progression.length);
+  if(!ok.length)throw new Error('コードが読み取れません');
+  return{version:'1.0',source:'lead-sheet',name:name,bpm:100,key:key||'C',timeSig:bpb,melody:{notes:[]},chords:{key:key||'C',sections:ok}}}
+
+// ===================== 音名・調 =====================
+const PC_S=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'],PC_F=['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+const LET={C:0,D:2,E:4,F:5,G:7,A:9,B:11},LI={C:0,D:1,E:2,F:3,G:4,A:5,B:6};
+const MAJ={C:0,G:1,D:2,A:3,E:4,B:5,'F#':6,'C#':7,F:-1,Bb:-2,Eb:-3,Ab:-4,Db:-5,Gb:-6},MIN={A:0,E:1,B:2,'F#':3,'C#':4,'G#':5,'D#':6,D:-1,G:-2,C:-3,F:-4,Bb:-5,Eb:-6};
+function parseKey(k){const m=String(k||'C').trim().replace(/♯/g,'#').replace(/♭/g,'b').match(/^([A-Ga-g])([#b]?)\s*(m|min|minor)?/);if(!m)return{fifths:0,minor:false,root:'C'};const r=m[1].toUpperCase()+m[2],minor=!!m[3]&&m[3][0]==='m'||/^[a-g]/.test(String(k).trim())&&!!m[3];
+  const f=(minor?MIN:MAJ)[r];return{fifths:f==null?0:f,minor,root:r}}
+function pcOf(root){const m=root.match(/^([A-G])([#b]?)/);return((LET[m[1]]+(m[2]==='#'?1:m[2]==='b'?-1:0))%12+12)%12}
+const KEYS_MAJ=['C','Db','D','Eb','E','F','F#','G','Ab','A','Bb','B'],KEYS_MIN=['Am','Bbm','Bm','Cm','C#m','Dm','Ebm','Em','Fm','F#m','Gm','G#m'];
+function transposedKey(k,semi){const p=parseKey(k),pc=(pcOf(p.root)+semi+120)%12;return p.minor?KEYS_MIN[(pc+3)%12]:KEYS_MAJ[pc]}
+function keyLabel(k){return String(k).replace(/b(?=m|$)/,'♭').replace('#','♯')}
+function spell(midi,fifths){const pc=((midi%12)+12)%12,name=(fifths<0?PC_F:PC_S)[pc];const letter=name[0],acc=name[1]==='#'?1:name[1]==='b'?-1:0;const oct=Math.floor(midi/12)-1;
+  // 調号での臨時記号の扱い
+  return{letter,acc,oct,step:oct*7+LI[letter]}}
+const SH_ORDER=['F','C','G','D','A','E','B'],FL_ORDER=['B','E','A','D','G','C','F'];
+function keySigMap(f){const m={};if(f>0)for(let i=0;i<f;i++)m[SH_ORDER[i]]=1;else for(let i=0;i<-f;i++)m[FL_ORDER[i]]=-1;return m}
+// コード名
+function parseChord(n){const m=String(n).replace(/♯/g,'#').replace(/♭/g,'b').match(/^([A-G])([#b]?)([^\/]*)(?:\/([A-G])([#b]?))?$/);if(!m)return null;return{root:m[1]+m[2],q:m[3],bass:m[4]?m[4]+m[5]:''}}
+function chordText(n,semi,fifths){const c=parseChord(n);if(!c)return String(n);
+  const tr=r=>{if(!semi)return r;const pc=(pcOf(r)+semi+120)%12;return(fifths<0?PC_F:PC_S)[pc]};
+  const fm=r=>r[0]+(r[1]==='#'?'♯':r[1]==='b'?'♭':'');
+  return fm(tr(c.root))+c.q.replace('maj','M').replace(/b(?=\d)/g,'♭').replace(/#(?=\d)/g,'♯')+(c.bass?'/'+fm(tr(c.bass)):'')}
+
+// ===================== 譜面の組み立て（小節・休符・タイ） =====================
+const ALLOWED=[4,3,2,1.5,1,.75,.5,.375,.25];
+function pieces(t,len){const out=[];let rem=len,p=t;let guard=0;
+  while(rem>1e-6&&guard++<40){let pick=null;for(const d of ALLOWED){if(d>rem+1e-6)continue;const base=d>=3?4:d>=2?2:d>=.75?1:d>=.5?.5:d>=.375?.5:.25;const al=Math.abs(((p%base)+base)%base)<1e-6||Math.abs((p%base)-base)<1e-6;if(al){pick=d;break}}
+    if(!pick)pick=.25;out.push(pick);p+=pick;rem-=pick}return out}
+function buildBars(S,semi){
+  const bpb=S.ts.bpb,q=.25;const notes=S.mel.map(n=>({p:Math.round(n.p)+semi,t:Math.round(n.t/q)*q,d:Math.max(q,Math.round(n.d/q)*q)})).sort((a,b)=>a.t-b.t||b.p-a.p);
+  const mono=[];notes.forEach(n=>{const last=mono[mono.length-1];if(last&&Math.abs(last.t-n.t)<1e-6)return;if(last&&last.t+last.d>n.t+1e-6)last.d=n.t-last.t;if(last&&last.d<q-1e-6)mono.pop();mono.push(Object.assign({},n))});
+  const melEnd=mono.length?mono[mono.length-1].t+mono[mono.length-1].d:0;
+  const total=Math.max(melEnd,S.chordBeats,bpb);const nBars=Math.ceil(total/bpb-1e-6);
+  const bars=[];for(let i=0;i<nBars;i++)bars.push({i,ev:[]});
+  const hasMel=mono.length>0;
+  const push=(t,len,isNote,p,tieIn)=>{ // t=絶対拍 len=長さ を小節と音価に分割
+    let p0=t,rem=len,first=true;
+    while(rem>1e-6){const bi=Math.floor(p0/bpb+1e-6),barStart=bi*bpb,inBar=p0-barStart,room=bpb-inBar,seg=Math.min(rem,room);
+      let ps;if(!isNote&&Math.abs(inBar)<1e-6&&Math.abs(seg-bpb)<1e-6)ps=[bpb];else ps=pieces(inBar,seg);
+      ps.forEach((d,k)=>{const ev={t:inBar+ps.slice(0,k).reduce((a,b)=>a+b,0),d,note:isNote,p,tieStop:isNote&&(!first||k>0)||false,tieStart:false,whole:(!isNote&&Math.abs(d-bpb)<1e-6)};bars[bi]&&bars[bi].ev.push(ev)});
+      p0+=seg;rem-=seg;first=false}};
+  if(hasMel){let ptr=0;mono.forEach(n=>{if(n.t>ptr+1e-6)push(ptr,n.t-ptr,false);const before=bars.map(b=>b.ev.length);push(n.t,n.d,true,n.p);ptr=n.t+n.d});if(ptr<nBars*bpb-1e-6)push(ptr,nBars*bpb-ptr,false)}
+  // タイ（同じ音の連続片）
+  const flat=[];bars.forEach(b=>b.ev.forEach(e=>flat.push(e)));
+  for(let i=0;i<flat.length-1;i++){if(flat[i].note&&flat[i+1].note&&flat[i+1].tieStop&&flat[i].p===flat[i+1].p)flat[i].tieStart=true;else if(flat[i+1]&&flat[i+1].tieStop&&!(flat[i].note&&flat[i].p===flat[i+1].p))flat[i+1].tieStop=false}
+  flat.forEach((e,i)=>{if(e.note&&!e.tieStart&&!(flat[i-1]&&flat[i-1].tieStart))e.tieStop=false});
+  // コード・セクションを小節に
+  const sym=[];S.secs.forEach(s=>s.chords.forEach(c=>sym.push({t:c.t,name:c.name})));
+  bars.forEach(b=>{b.chords=sym.filter(c=>Math.floor(c.t/bpb+1e-6)===b.i).map(c=>({t:c.t-b.i*bpb,name:c.name}))});
+  S.secs.forEach(s=>{const bi=Math.floor(s.start/bpb+1e-6);if(s.tag&&bars[bi])bars[bi].label=s.tag});
+  return{bars,hasMel,bpb}}
+function durName(d){return{4:['whole',0],3:['half',1],2:['half',0],1.5:['quarter',1],1:['quarter',0],.75:['eighth',1],.5:['eighth',0],.375:['16th',1],.25:['16th',0]}[d]||['quarter',0]}
+
+// ===================== 描画（五線譜をSVGで描く） =====================
+const SP=8,HS=4; // 線間 / 半間
+function glyphOK(){if(glyphOK.v!==undefined)return glyphOK.v;try{const c=document.createElement('canvas');c.width=c.height=30;const g=c.getContext('2d');g.font='24px serif';g.fillText('\u{1D11E}',2,24);const a=g.getImageData(0,0,30,30).data;g.clearRect(0,0,30,30);g.fillText('\u{1D1FF}',2,24);const b=g.getImageData(0,0,30,30).data;let diff=0;for(let i=3;i<a.length;i+=4)if((a[i]>0)!==(b[i]>0))diff++;glyphOK.v=diff>8}catch(e){glyphOK.v=false}return glyphOK.v}
+function render(S,semi,W,opt){
+  opt=opt||{};const K=parseKey(transposedKey(S.key,semi));const fifths=K.fifths;const ksm=keySigMap(fifths);
+  const B=buildBars(S,semi);const {bars,hasMel,bpb}=B;
+  // 音域でト音／ヘ音記号を決める
+  const pitches=[];bars.forEach(b=>b.ev.forEach(e=>{if(e.note)pitches.push(e.p)}));pitches.sort((a,b)=>a-b);
+  const med=pitches.length?pitches[pitches.length>>1]:67;const bass=med<55;
+  const base=bass?18:30; // 一番下の線の step（G2 / E4）
+  const posOf=(m)=>{const s=spell(m,fifths);return{p:s.step-base,s}};
+  // 最大・最小位置
+  let maxP=8,minP=0;pitches.forEach(m=>{const p=posOf(m).p;if(p>maxP)maxP=p;if(p<minP)minP=p});
+  const topExtra=Math.max(0,(maxP-12))*HS,botExtra=Math.max(0,(-minP-2))*HS;
+  // 幅の見積もり
+  const slot=d=>16+22*Math.sqrt(d);
+  const sigW=Math.abs(fifths)*9;
+  const left1=18+30+sigW+(opt.noTS?0:26)+8,leftN=18+30+sigW+8,right=10;
+  bars.forEach(b=>{let w=10+10;b.ev.forEach(e=>{w+=slot(e.d)});if(!hasMel)w=Math.max(w,bpb*24+20);const nch=b.chords.length;w=Math.max(w,nch*46+12);b.min=w});
+  const lines=[];let cur=[],curW=0,first=true;
+  bars.forEach(b=>{const avail=W-(first?left1:leftN)-right;if(cur.length&&curW+b.min>avail){lines.push({bars:cur,first:lines.length===0});cur=[];curW=0;first=false}cur.push(b);curW+=b.min});
+  if(cur.length)lines.push({bars:cur,first:lines.length===0});
+  // 描画
+  const INK='#111';let y=10;let out='';
+  const titleH=opt.title?64:0;
+  if(opt.title){out+='<text x="'+W/2+'" y="30" text-anchor="middle" font-size="22" font-weight="700" fill="'+INK+'" font-family="-apple-system,Hiragino Sans,sans-serif">'+esc(S.name)+'</text>'+
+    '<text x="'+W/2+'" y="52" text-anchor="middle" font-size="12" fill="#444" font-family="-apple-system,Hiragino Sans,sans-serif">♩= '+S.bpm+'　Key: '+esc(keyLabel(transposedKey(S.key,semi)))+'　'+S.ts.n+'/'+S.ts.d+'</text>';y=titleH}
+  const SYSTOP=34+topExtra,SYSBOT=SP*4+22+botExtra;
+  lines.forEach((L,li)=>{
+    const top=y+SYSTOP,yl=k=>top+k*SP;const x0=10,leftM=L.first?left1:leftN;
+    // 五線
+    const avail=W-leftM-right-0;const totalMin=L.bars.reduce((a,b)=>a+b.min,0);const scale=avail/totalMin;
+    const xs=[];let xx=x0+leftM-10;L.bars.forEach(b=>{xs.push(xx);xx+=b.min*scale});const xEnd=xx;
+    for(let k=0;k<5;k++)out+='<line x1="'+(x0)+'" x2="'+xEnd+'" y1="'+yl(k)+'" y2="'+yl(k)+'" stroke="'+INK+'" stroke-width="1"/>';
+    out+='<line x1="'+x0+'" x2="'+x0+'" y1="'+yl(0)+'" y2="'+yl(4)+'" stroke="'+INK+'" stroke-width="1.6"/>';
+    // 記号
+    const yP=p=>top+(8-p)*HS;
+    if(glyphOK()){out+='<text x="'+(x0+4)+'" y="'+(bass?yP(6)+2:yP(2)+10)+'" font-size="'+(bass?34:50)+'" fill="'+INK+'" font-family="\'Noto Music\',\'Apple Symbols\',\'Segoe UI Symbol\',serif">'+(bass?'\u{1D122}':'\u{1D11E}')+'</text>'}
+    else{out+='<text x="'+(x0+6)+'" y="'+(yP(bass?6:2)+8)+'" font-size="30" font-weight="700" fill="'+INK+'" font-family="serif">'+(bass?'F':'G')+'</text>'}
+    const sh=[ [8,5,9,6,3,7,4],[6,3,7,4,1,5,2] ],fl=[ [4,7,3,6,2,5,1],[2,5,1,4,0,3,6] ];
+    for(let i=0;i<Math.abs(fifths);i++){const pp=(fifths>0?sh:fl)[bass?1:0][i];out+='<text x="'+(x0+30+i*9)+'" y="'+(yP(pp)+5)+'" font-size="18" fill="'+INK+'" font-family="\'Apple Symbols\',serif">'+(fifths>0?'♯':'♭')+'</text>'}
+    if(L.first&&!opt.noTS){const tx=x0+30+sigW+6;out+='<text x="'+tx+'" y="'+(yl(2)-2)+'" font-size="20" font-weight="800" fill="'+INK+'" text-anchor="middle" font-family="serif">'+S.ts.n+'</text><text x="'+tx+'" y="'+(yl(4)-2)+'" font-size="20" font-weight="800" fill="'+INK+'" text-anchor="middle" font-family="serif">'+S.ts.d+'</text>'}
+    // 小節
+    L.bars.forEach((b,bi)=>{
+      const bx=xs[bi],bw=(bi+1<xs.length?xs[bi+1]:xEnd)-bx;const isLast=(b.i===bars.length-1);
+      out+='<line x1="'+(bi+1<xs.length?xs[bi+1]:xEnd)+'" x2="'+(bi+1<xs.length?xs[bi+1]:xEnd)+'" y1="'+yl(0)+'" y2="'+yl(4)+'" stroke="'+INK+'" stroke-width="'+(isLast?2.4:1.2)+'"/>';
+      if(isLast)out+='<line x1="'+(xEnd-4)+'" x2="'+(xEnd-4)+'" y1="'+yl(0)+'" y2="'+yl(4)+'" stroke="'+INK+'" stroke-width="1"/>';
+      out+='<text x="'+(bx+3)+'" y="'+(yl(0)-(topExtra+16+8))+'" font-size="9" fill="#888" font-family="sans-serif">'+(b.i+1)+'</text>';
+      if(b.label)out+='<rect x="'+(bx+2)+'" y="'+(yl(0)-topExtra-40)+'" width="'+(b.label.length*10+10)+'" height="16" fill="none" stroke="'+INK+'" stroke-width="1.2"/><text x="'+(bx+7)+'" y="'+(yl(0)-topExtra-28)+'" font-size="12" font-weight="700" fill="'+INK+'" font-family="-apple-system,Hiragino Sans,sans-serif">'+esc(b.label)+'</text>';
+      const padL=12,padR=8;const slots=b.ev.map(e=>slot(e.d));const sum=slots.reduce((a,c)=>a+c,0)||1;const usable=bw-padL-padR;
+      if(!hasMel){ // コード譜：拍ごとのスラッシュ
+        for(let k=0;k<Math.round(bpb);k++){const cx=bx+padL+(k+.5)*(usable/Math.round(bpb));out+='<line x1="'+(cx-5)+'" x2="'+(cx+5)+'" y1="'+(yl(3)+0)+'" y2="'+(yl(1)+0)+'" stroke="'+INK+'" stroke-width="2.6"/>'}
+      }
+      let cxp=bx+padL;const placed=[];
+      b.ev.forEach((e,k)=>{const w=slots[k]/sum*usable;e.x=cxp+w/2-(e.note?0:0);e.xl=cxp;cxp+=w;placed.push(e)});
+      // コード名
+      b.chords.forEach(c=>{let cx;if(hasMel&&placed.length){const ev=placed.find(e=>e.t>=c.t-1e-6)||placed[placed.length-1];cx=(ev.xl)}else cx=bx+padL+(c.t/bpb)*usable;
+        out+='<text x="'+cx+'" y="'+(yl(0)-topExtra-(b.label?2:8)+(b.label?0:0)-0)+'" font-size="15" font-weight="700" fill="'+INK+'" font-family="-apple-system,Hiragino Sans,sans-serif">'+esc(chordText(c.name,semi,fifths))+'</text>'});
+      // 音符・休符
+      const accSeen={};
+      const heads=[];
+      b.ev.forEach(e=>{
+        if(!e.note){out+=restSvg(e,yl(0),INK);return}
+        const ps=posOf(e.p),p=ps.p,s=ps.s,cy=yP(p);e.cy=cy;e.pp=p;
+        // 臨時記号
+        const key=s.letter+s.oct,want=s.acc,inSig=ksm[s.letter]||0;
+        const prev=accSeen[key]!==undefined?accSeen[key]:inSig;
+        if(want!==prev){out+='<text x="'+(e.x-15)+'" y="'+(cy+5)+'" font-size="17" fill="'+INK+'" font-family="\'Apple Symbols\',serif">'+(want===1?'♯':want===-1?'♭':'♮')+'</text>';accSeen[key]=want}
+        // 加線
+        if(p<0)for(let q=0;q>=p;q-=2){if(q<=0&&q%2===0&&q!==0||q===0&&false){}}
+        for(let q=-2;q>=p-(p%2?1:0);q-=2)if(q<=p+(p%2?1:0)||q>=p)out+='';
+        const ledger=[];if(p<=-2)for(let q=-2;q>=p-(p%2===0?0:1)+(p%2===0?0:1);q-=2)ledger.push(q);if(p>=10)for(let q=10;q<=p;q+=2)ledger.push(q);
+        if(p<=0&&p%2===0)ledger.push(0*0); // p=0 は一番下の線
+        ledger.filter((v,ix)=>ledger.indexOf(v)===ix&&((v<0)||(v>8))).forEach(q=>{out+='<line x1="'+(e.x-9)+'" x2="'+(e.x+9)+'" y1="'+yP(q)+'" y2="'+yP(q)+'" stroke="'+INK+'" stroke-width="1.2"/>'});
+        heads.push(e);
+      });
+      // 符頭・符幹・旗・連桁
+      let i=0;while(i<heads.length){
+        const e=heads[i];const [nm,dot]=durName(e.d);
+        // 連桁グループ（同じ拍の中の8分・16分）
+        let grp=[e];if(e.d<=.5){let j=i+1;while(j<heads.length&&heads[j].d<=.5&&Math.floor(heads[j].t+1e-6)===Math.floor(e.t+1e-6)&&b.ev.indexOf(heads[j])===b.ev.indexOf(heads[j-1])+1){grp.push(heads[j]);j++}}
+        const avgP=grp.reduce((a,n)=>a+n.pp,0)/grp.length;const up=avgP<4;
+        grp.forEach(n=>{out+=headSvg(n,up,INK,n.d)});
+        if(grp.length>=2){
+          const sx=n=>n.x+(up?5.2:-5.2);const stemLen=SP*3.2;
+          const ends=grp.map(n=>n.cy+(up?-stemLen:stemLen));const ext=up?Math.min(...ends):Math.max(...ends);
+          grp.forEach(n=>{out+='<line x1="'+sx(n)+'" x2="'+sx(n)+'" y1="'+n.cy+'" y2="'+ext+'" stroke="'+INK+'" stroke-width="1.3"/>'});
+          const bx1=sx(grp[0]),bx2=sx(grp[grp.length-1]);const th=4,dir=up?1:-1;
+          out+='<polygon points="'+bx1+','+ext+' '+bx2+','+ext+' '+bx2+','+(ext+dir*th)+' '+bx1+','+(ext+dir*th)+'" fill="'+INK+'"/>';
+          // 16分は2本目
+          for(let g=0;g<grp.length-1;g++){if(grp[g].d<=.25&&grp[g+1].d<=.25){const a=sx(grp[g]),c2=sx(grp[g+1]);out+='<polygon points="'+a+','+(ext+dir*(th+2))+' '+c2+','+(ext+dir*(th+2))+' '+c2+','+(ext+dir*(th*2+2))+' '+a+','+(ext+dir*(th*2+2))+'" fill="'+INK+'"/>'}else if(grp[g].d<=.25||grp[g+1].d<=.25){const a=grp[g].d<=.25?sx(grp[g]):sx(grp[g+1])-7,c2=grp[g].d<=.25?sx(grp[g])+7:sx(grp[g+1]);out+='<polygon points="'+a+','+(ext+dir*(th+2))+' '+c2+','+(ext+dir*(th+2))+' '+c2+','+(ext+dir*(th*2+2))+' '+a+','+(ext+dir*(th*2+2))+'" fill="'+INK+'"/>'}}
+        }else{
+          if(e.d<4){const sx=e.x+(up?5.2:-5.2),y2=e.cy+(up?-SP*3.4:SP*3.4);out+='<line x1="'+sx+'" x2="'+sx+'" y1="'+e.cy+'" y2="'+y2+'" stroke="'+INK+'" stroke-width="1.3"/>';
+            if(e.d<=.5){const nf=e.d<=.25?2:1;for(let f=0;f<nf;f++){const dy=(up?1:-1)*f*6;out+='<path d="M'+sx+' '+(y2-dy*-1*0+ (up?f*6:-f*6))+' q'+(up?'8 6 5 16':'8 -6 5 -16')+'" fill="none" stroke="'+INK+'" stroke-width="2"/>'}}}
+        }
+        i+=grp.length}
+      // タイ
+      b.ev.forEach((e,k)=>{if(e.note&&e.tieStart){const nx=b.ev[k+1]&&b.ev[k+1].note&&b.ev[k+1].p===e.p?b.ev[k+1].x:xEnd-2;const up=(e.pp||0)>=4;const yy=e.cy+(up?-6:6);out+='<path d="M'+(e.x+3)+' '+yy+' Q'+((e.x+nx)/2)+' '+(yy+(up?-9:9))+' '+(nx-3)+' '+yy+'" fill="none" stroke="'+INK+'" stroke-width="1.3"/>'}});
+    });
+    y=top+SYSBOT-2+14});
+  const H=y+10;
+  return{svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'"><rect width="100%" height="100%" fill="#fff"/>'+out+'</svg>',w:W,h:H,bars:bars.length,bass:bass,key:K}}
+function headSvg(n,up,INK,d){const open=d>=2;const dotx=n.x+10;let s='<ellipse cx="'+n.x+'" cy="'+n.cy+'" rx="6.2" ry="4.3" transform="rotate(-20 '+n.x+' '+n.cy+')" fill="'+(open?'#fff':INK)+'" stroke="'+INK+'" stroke-width="'+(open?1.6:1)+'"/>';
+  if(d>=4)s=s.replace('rx="6.2" ry="4.3"','rx="7" ry="4.6"');
+  const dot=durName(d)[1];if(dot)s+='<circle cx="'+(dotx+2)+'" cy="'+(n.cy+((n.pp%2===0)?-3:0))+'" r="1.8" fill="'+INK+'"/>';return s}
+function restSvg(e,top,INK){const cx=e.x;let s='';const nm=durName(e.d)[0];
+  if(e.whole||nm==='whole'){s='<rect x="'+(cx-6)+'" y="'+(top+SP)+'" width="12" height="4" fill="'+INK+'"/>'}
+  else if(nm==='half'){s='<rect x="'+(cx-6)+'" y="'+(top+2*SP-4)+'" width="12" height="4" fill="'+INK+'"/>'}
+  else if(nm==='quarter'){s='<path d="M'+(cx-2)+' '+(top+6)+' L'+(cx+3)+' '+(top+13)+' L'+(cx-3)+' '+(top+20)+' L'+(cx+2)+' '+(top+25)+' Q'+(cx-4)+' '+(top+25)+' '+(cx-2)+' '+(top+30)+'" fill="none" stroke="'+INK+'" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>'}
+  else{const n=nm==='16th'?2:1;s='<path d="M'+(cx+3)+' '+(top+10)+' L'+(cx-2)+' '+(top+10+n*8+8)+'" stroke="'+INK+'" stroke-width="1.6" fill="none"/>';for(let k=0;k<n;k++)s+='<circle cx="'+(cx-1+ -k*2)+'" cy="'+(top+12+k*7)+'" r="2.2" fill="'+INK+'"/>'}
+  if(durName(e.d)[1])s+='<circle cx="'+(cx+9)+'" cy="'+(top+2*SP-4)+'" r="1.8" fill="'+INK+'"/>';return s}
+
+// ===================== MusicXML =====================
+function toMusicXML(S,semi){
+  const K=parseKey(transposedKey(S.key,semi)),f=K.fifths,B=buildBars(S,semi),{bars,bpb,hasMel}=B;
+  const x=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const kindOf=q=>{const t=q||'';if(t==='')return'major';if(t==='m'||t==='min')return'minor';if(t==='7')return'dominant';if(t==='maj7'||t==='M7')return'major-seventh';if(t==='m7')return'minor-seventh';if(t==='dim'||t==='°')return'diminished';if(t==='aug'||t==='+')return'augmented';if(t==='sus4'||t==='sus')return'suspended-fourth';if(t==='sus2')return'suspended-second';if(t==='6')return'major-sixth';if(t==='m6')return'minor-sixth';if(t==='9')return'dominant-ninth';if(t==='m7b5')return'half-diminished';return'other'};
+  const stepAlter=r=>{const m=r.match(/^([A-G])([#b]?)/);return{s:m[1],a:m[2]==='#'?1:m[2]==='b'?-1:0}};
+  const tr=r=>{const pc=(pcOf(r)+semi+120)%12;return(f<0?PC_F:PC_S)[pc]};
+  let xml='<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">\n<score-partwise version="3.1">\n<work><work-title>'+x(S.name)+'</work-title></work>\n<identification><encoding><software>lead-sheet</software></encoding></identification>\n<part-list><score-part id="P1"><part-name>Lead</part-name></score-part></part-list>\n<part id="P1">\n';
+  const pitches=[];bars.forEach(b=>b.ev.forEach(e=>{if(e.note)pitches.push(e.p)}));pitches.sort((a,b)=>a-b);const bass=pitches.length&&pitches[pitches.length>>1]<55;
+  bars.forEach((b,bi)=>{
+    xml+='<measure number="'+(bi+1)+'">\n';
+    if(bi===0){xml+='<attributes><divisions>4</divisions><key><fifths>'+f+'</fifths><mode>'+(K.minor?'minor':'major')+'</mode></key><time><beats>'+S.ts.n+'</beats><beat-type>'+S.ts.d+'</beat-type></time><clef><sign>'+(bass?'F':'G')+'</sign><line>'+(bass?4:2)+'</line></clef></attributes>\n<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>'+S.bpm+'</per-minute></metronome></direction-type><sound tempo="'+S.bpm+'"/></direction>\n'}
+    const hs=b.chords.slice();const emitH=t=>{while(hs.length&&hs[0].t<=t+1e-6){const c=hs.shift();const pc=parseChord(c.name);if(!pc)continue;const R=stepAlter(tr(pc.root));xml+='<harmony><root><root-step>'+R.s+'</root-step>'+(R.a?'<root-alter>'+R.a+'</root-alter>':'')+'</root><kind text="'+x(chordText(c.name,semi,f))+'">'+kindOf(pc.q)+'</kind>'+(pc.bass?(()=>{const Bs=stepAlter(tr(pc.bass));return'<bass><bass-step>'+Bs.s+'</bass-step>'+(Bs.a?'<bass-alter>'+Bs.a+'</bass-alter>':'')+'</bass>'})():'')+'</harmony>\n'}};
+    if(!hasMel){ // コードだけ：休符の小節にコードを載せる
+      hs.forEach(()=>{});emitH(bpb);xml+='<note><rest measure="yes"/><duration>'+Math.round(bpb*4)+'</duration></note>\n'}
+    else b.ev.forEach(e=>{emitH(e.t);const [tn,dt]=durName(e.d);const dur=Math.round(e.d*4);
+      if(!e.note){xml+='<note>'+(e.whole?'<rest measure="yes"/>':'<rest/>')+'<duration>'+dur+'</duration>'+(e.whole?'':'<type>'+tn+'</type>'+(dt?'<dot/>':''))+'</note>\n';return}
+      const s=spell(e.p,f);xml+='<note><pitch><step>'+s.letter+'</step>'+(s.acc?'<alter>'+s.acc+'</alter>':'')+'<octave>'+s.oct+'</octave></pitch><duration>'+dur+'</duration>'+(e.tieStop?'<tie type="stop"/>':'')+(e.tieStart?'<tie type="start"/>':'')+'<type>'+tn+'</type>'+(dt?'<dot/>':'')+((e.tieStop||e.tieStart)?'<notations>'+(e.tieStop?'<tied type="stop"/>':'')+(e.tieStart?'<tied type="start"/>':'')+'</notations>':'')+'</note>\n'});
+    emitH(bpb);xml+='</measure>\n'});
+  return xml+'</part>\n</score-partwise>\n'}
+
+// ===================== 画面の動き =====================
+function show(){
+  if(!SONG)return;
+  $('songCard').hidden=$('paper').hidden=$('outCard').hidden=false;
+  $('title').value=SONG.name;$('tVal').textContent=(TR>0?'+':'')+TR;
+  const kk=transposedKey(SONG.key,TR);$('keyInfo').textContent='Key '+keyLabel(kk)+(TR?'（元 '+keyLabel(SONG.key)+'）':'');
+  const W=Math.max(320,Math.min(900,$('paper').clientWidth||360))*1.0;
+  const px=Math.round(W);const r=render(SONG,TR,px<420?420:px,{title:true});
+  $('paper').innerHTML=r.svg;
+  say(r.bars+'小節 ／ '+(SONG.mel.length?'メロディ '+SONG.mel.length+'音':'コードのみ')+(SONG.secs.length&&SONG.secs[0].chords.length?' ／ コード '+SONG.secs.reduce((a,s)=>a+s.chords.length,0)+'個':''),'ok')}
+function load(json,src){try{const S=normalize(json);if(!S.mel.length&&!S.secs.length)throw new Error('メロディもコードも見つかりません');SONG=S;SRC=json;TR=0;try{localStorage.setItem(LS_LAST,JSON.stringify(json))}catch(e){}rec(S.name,json);show();$('inBox').hidden=true}catch(e){say('読み込めませんでした：'+(e.message||e),'er')}}
+function rec(name,json){try{let a=JSON.parse(localStorage.getItem(LS_R)||'[]');a=a.filter(x=>x.name!==name);a.unshift({name,json,at:Date.now()});a=a.slice(0,8);localStorage.setItem(LS_R,JSON.stringify(a));drawRecent()}catch(e){}}
+function drawRecent(){let a=[];try{a=JSON.parse(localStorage.getItem(LS_R)||'[]')}catch(e){}$('recent').innerHTML=a.length?'<h4>最近の曲</h4>'+a.map((x,i)=>'<button class="sm" data-r="'+i+'">'+esc(x.name)+'</button>').join(''):''}
+$('recent').onclick=e=>{const b=e.target.closest('[data-r]');if(!b)return;let a=JSON.parse(localStorage.getItem(LS_R)||'[]');const x=a[+b.dataset.r];if(x)load(x.json)};
+$('bHelp').onclick=()=>$('help').hidden=!$('help').hidden;
+$('bFile').onclick=()=>$('fFile').click();
+$('fFile').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;try{load(JSON.parse(await f.text()))}catch(err){say('JSONとして読めません','er')}};
+let inMode='';
+function openIn(mode){inMode=mode;$('inBox').hidden=false;$('inTa').value='';$('inTa').placeholder=mode==='json'?'music-suite のJSONをここに貼り付け':'例）\nKey: C\nA: C Am | F G7\nB: F G | C\n（| か改行で小節を区切る。1小節に複数あれば拍を等分。Key: / A: は省略可）';$('inHint').textContent=mode==='json'?'chord-lab / vocal-lab / score-editor が書き出したJSONに対応':'コード名は C, Am, F#m7, Bb, G7/B のように書けます。小節は | または改行で区切ります';$('inTa').focus()}
+$('bPaste').onclick=()=>openIn('json');$('bChords').onclick=()=>openIn('chords');$('inX').onclick=()=>$('inBox').hidden=true;
+$('inOk').onclick=()=>{const t=$('inTa').value;if(!t.trim())return;try{if(inMode==='json')load(JSON.parse(t));else{const key=prompt('キーは？（例 C, G, Am, Bb）','C')||'C';load(songFromChordText(t,key,4))}}catch(e){say('読み込めませんでした：'+(e.message||e),'er')}};
+$('bDemo').onclick=()=>load(DEMO);
+$('title').oninput=()=>{if(SONG){SONG.name=$('title').value;if(SRC)SRC.name=$('title').value;clearTimeout(show.t);show.t=setTimeout(show,300)}};
+$('tUp').onclick=()=>{TR=Math.min(12,TR+1);show()};$('tDn').onclick=()=>{TR=Math.max(-12,TR-1);show()};$('tRst').onclick=()=>{TR=0;show()};
+window.addEventListener('resize',()=>{clearTimeout(show.t);show.t=setTimeout(show,200)});
+// ---- 出力 ----
+function fname(){return(SONG.name||'lead-sheet').replace(/[\\\/:*?"<>|\s]+/g,'-')+(TR?'('+(TR>0?'+':'')+TR+')':'')}
+async function shareFile(blob,name,type){const f=new File([blob],name,{type});try{if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return true}}catch(e){if(e&&e.name==='AbortError')return true}
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);return true}
+$('oPrint').onclick=()=>{if(!SONG)return;const r=render(SONG,TR,760,{title:true});$('printArea').innerHTML=r.svg;setTimeout(()=>window.print(),100)};
+$('oPng').onclick=()=>{if(!SONG)return;const r=render(SONG,TR,900,{title:true});const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=r.w*2;c.height=r.h*2;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.scale(2,2);g.drawImage(img,0,0,r.w,r.h);c.toBlob(b=>shareFile(b,fname()+'.png','image/png').then(()=>say('画像を出しました','ok')))};img.onerror=()=>say('画像にできませんでした','er');img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(r.svg)};
+$('oXml').onclick=()=>{if(!SONG)return;try{const xml=toMusicXML(SONG,TR);shareFile(new Blob([xml],{type:'application/vnd.recordare.musicxml+xml'}),fname()+'.musicxml','application/vnd.recordare.musicxml+xml').then(()=>say('MusicXMLを出しました（MuseScore・Finale・Dorico等で開けます）','ok'))}catch(e){say('MusicXMLにできませんでした：'+(e.message||e),'er')}};
+$('oJson').onclick=()=>{if(SRC)shareFile(new Blob([JSON.stringify(SRC)],{type:'application/json'}),fname()+'.json','application/json').then(()=>say('JSONを出しました','ok'))};
+$('oLink').onclick=async()=>{if(!SRC)return;const j=Object.assign({},SRC);const b64=btoa(unescape(encodeURIComponent(JSON.stringify(j))));const url=location.origin+location.pathname+'#import='+b64+(TR?'&tr='+TR:'');
+  if(url.length>6000){say('この曲は長いので、リンクが長くなります（'+url.length+'文字）。うまく開けないときは「PDF」か「JSON」で共有してください','er')}
+  try{if(navigator.share){await navigator.share({title:SONG.name,url});return}}catch(e){if(e&&e.name==='AbortError')return}
+  try{await navigator.clipboard.writeText(url);say('リンクをコピーしました（'+url.length+'文字）','ok')}catch(e){prompt('このリンクをコピーしてください',url)}};
+// ---- 起動 ----
+const DEMO={version:'1.0',source:'demo',name:'きらきら星（サンプル）',bpm:100,key:'C',timeSig:4,
+ melody:{notes:(()=>{const m=[[60,1],[60,1],[67,1],[67,1],[69,1],[69,1],[67,2],[65,1],[65,1],[64,1],[64,1],[62,1],[62,1],[60,2],[67,1],[67,1],[65,1],[65,1],[64,1],[64,1],[62,2],[67,1],[67,1],[65,1],[65,1],[64,1],[64,1],[62,2],[60,1],[60,1],[67,1],[67,1],[69,1],[69,1],[67,2],[65,1],[65,1],[64,1],[64,1],[62,1],[62,1],[60,2]];let t=0;return m.map(([p,d])=>{const n={pitch:p,startBeat:t,durationBeats:d,vel:80};t+=d;return n})})()},
+ chords:{key:'C',sections:[{tag:'A',progression:[{chord:'C',beats:4},{chord:'F',beats:2},{chord:'C',beats:2},{chord:'F',beats:2},{chord:'C',beats:2},{chord:'G7',beats:4},{chord:'C',beats:4},{chord:'G7',beats:4},{chord:'C',beats:4},{chord:'G7',beats:4},{chord:'C',beats:4}]}]}};
+window.__ls={normalize,buildBars,render,toMusicXML,load,songFromChordText,spell,transposedKey,chordText};
+(function(){drawRecent();
+  const h=location.hash||'';const m=h.match(/import=([^&]+)/);const t=h.match(/tr=(-?\d+)/);
+  if(m){try{const json=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));load(json);if(t){TR=+t[1];show()}history.replaceState(null,'',location.pathname);return}catch(e){say('共有リンクを読み込めませんでした','er')}}
+  try{const last=localStorage.getItem(LS_LAST);if(last)load(JSON.parse(last))}catch(e){}
+})();
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')){navigator.serviceWorker.register('sw.js').catch(()=>{})}
+})();
+</script></body></html>

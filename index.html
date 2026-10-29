@@ -29,7 +29,7 @@ textarea{min-height:110px;font-family:ui-monospace,Menlo,monospace;font-size:14p
   #printArea{display:block!important}#printArea svg{width:100%;height:auto}
 }
 </style></head><body>
-<header><b>🎼 lead-sheet</b><button class="sm" id="bHelp">使い方</button></header>
+<header><b>🎼 lead-sheet</b><a href="../music-suite/" id="aSuite" style="text-decoration:none"><button class="sm" type="button">🎹 music-suite</button></a><button class="sm" id="bHelp">使い方</button></header>
 
 <div id="help" class="card" hidden style="font-size:13px;line-height:1.8;color:var(--dim)">
 <b style="color:var(--tx)">楽譜を打ち出して共有する</b><br>
@@ -45,6 +45,7 @@ textarea{min-height:110px;font-family:ui-monospace,Menlo,monospace;font-size:14p
   <input type="file" id="fFile" accept=".json,application/json" hidden>
   <div id="inBox" hidden style="margin-top:10px"><textarea id="inTa" spellcheck="false"></textarea><div class="row" style="margin-top:8px"><button class="pri sm" id="inOk">楽譜にする</button><button class="sm" id="inX">閉じる</button></div><div id="inHint" style="font-size:12px;color:var(--dim);margin-top:6px;line-height:1.6"></div></div>
   <div class="recent" id="recent" style="margin-top:10px"></div>
+  <div class="recent" id="suiteList" style="margin-top:10px"></div>
 </div>
 
 <div id="msg"></div>
@@ -59,6 +60,8 @@ textarea{min-height:110px;font-family:ui-monospace,Menlo,monospace;font-size:14p
 <div class="card" id="outCard" hidden style="margin-top:12px">
   <h4>② 打ち出す・共有する</h4>
   <div class="row"><button class="pri" id="oPrint">🖨 PDF・印刷</button><button id="oPng">🖼 画像で保存</button><button id="oXml">🎹 MusicXML</button><button id="oLink">🔗 共有リンク</button><button id="oJson">{ } JSON</button></div>
+  <h4 style="margin-top:12px">③ music-suite につなぐ</h4>
+  <div class="row"><button id="oSuite">🎹 music-suite に送る</button><button id="oChord">🎸 chord-lab で直す</button><button id="oScore">🎼 score-editor で続ける</button></div>
 </div>
 <div id="printArea"></div>
 
@@ -72,8 +75,15 @@ function say(m,c){const e=$('msg');e.textContent=m||'';e.className=c||''}
 let SONG=null,SRC=null,TR=0; // SONG=正規化した曲 / SRC=元のJSON / TR=移調
 const LS_R='ls_recent_v1',LS_LAST='ls_last_v1';
 function parseTS(ts){if(ts==null||ts==='')return{n:4,d:4,bpb:4};if(typeof ts==='number')return{n:ts,d:4,bpb:ts};const m=String(ts).match(/(\d+)\s*\/\s*(\d+)/);if(m){const n=+m[1],d=+m[2];return{n,d,bpb:n*4/d}}const k=parseFloat(ts);return k?{n:k,d:4,bpb:k}:{n:4,d:4,bpb:4}}
+function cardsToMelody(cards){const notes=[];let t=0;(cards||[]).forEach(c=>{const arr=Array.isArray(c.notes)?c.notes:[];arr.forEach(n=>{const p=typeof n==='number'?n:(n&&(n.pitch!=null?n.pitch:n.midiR!=null?n.midiR:n.midi));if(p==null||isNaN(p))return;const d=(n&&typeof n==='object'&&(n.durationBeats||n.dur||n.beats))||1;notes.push({pitch:Math.round(p),startBeat:t,durationBeats:+d||1});t+=(+d||1)});t=Math.ceil(t/4)*4});return notes}
+function fixInput(j){if(!j||typeof j!=='object'||Array.isArray(j))return j;j=Object.assign({},j);
+  if(Array.isArray(j.chords)){j.chords={key:j.key,sections:[{tag:j.sectionName||'',progression:j.chords.map(c=>({chord:c.chord||c.name,beats:c.beats||c.duration||4}))}]}}
+  if(j.chords&&Array.isArray(j.chords.sections))j.chords=Object.assign({},j.chords,{sections:j.chords.sections.map(s=>Object.assign({},s,{progression:(s.progression||[]).map(c=>Object.assign({},c,{beats:c.beats||c.duration||4}))}))});
+  if(!(j.melody&&j.melody.notes&&j.melody.notes.length)&&Array.isArray(j.cards)&&j.cards.length)j.melody={notes:cardsToMelody(j.cards)};
+  return j}
 function normalize(j){
   if(Array.isArray(j))j={source:'vocal-lab',melody:{notes:j}};
+  j=fixInput(j);
   if(!j||typeof j!=='object')throw new Error('曲のデータではありません');
   const mel=(((j.melody&&j.melody.notes)||(Array.isArray(j.melody)?j.melody:null)||j.notes||[])).map(n=>({p:n.pitch!=null?n.pitch:(n.midiR!=null?n.midiR:n.midi),t:n.startBeat!=null?n.startBeat:(n.start!=null?n.start:n.beat),d:n.durationBeats!=null?n.durationBeats:(n.dur!=null?n.dur:(n.beats!=null?n.beats:n.duration))})).filter(n=>typeof n.p==='number'&&typeof n.t==='number'&&typeof n.d==='number'&&n.d>0);
   const secs=[];let cb=0;
@@ -288,7 +298,7 @@ function show(){
   const px=Math.round(W);const r=render(SONG,TR,px<420?420:px,{title:true});
   $('paper').innerHTML=r.svg;
   say(r.bars+'小節 ／ '+(SONG.mel.length?'メロディ '+SONG.mel.length+'音':'コードのみ')+(SONG.secs.length&&SONG.secs[0].chords.length?' ／ コード '+SONG.secs.reduce((a,s)=>a+s.chords.length,0)+'個':''),'ok')}
-function load(json,src){try{const S=normalize(json);if(!S.mel.length&&!S.secs.length)throw new Error('メロディもコードも見つかりません');SONG=S;SRC=json;TR=0;try{localStorage.setItem(LS_LAST,JSON.stringify(json))}catch(e){}rec(S.name,json);show();$('inBox').hidden=true}catch(e){say('読み込めませんでした：'+(e.message||e),'er')}}
+function load(json,src){try{const S=normalize(json);if(!S.mel.length&&!S.secs.length)throw new Error('メロディもコードも見つかりません');SONG=S;SRC=json;TR=0;try{localStorage.setItem(LS_LAST,JSON.stringify(json))}catch(e){}rec(S.name,json);if(src!=='suite')msRegister(Object.assign({},json,{name:json.name||json.title||S.name}));drawSuite();show();$('inBox').hidden=true}catch(e){say('読み込めませんでした：'+(e.message||e),'er')}}
 function rec(name,json){try{let a=JSON.parse(localStorage.getItem(LS_R)||'[]');a=a.filter(x=>x.name!==name);a.unshift({name,json,at:Date.now()});a=a.slice(0,8);localStorage.setItem(LS_R,JSON.stringify(a));drawRecent()}catch(e){}}
 function drawRecent(){let a=[];try{a=JSON.parse(localStorage.getItem(LS_R)||'[]')}catch(e){}$('recent').innerHTML=a.length?'<h4>最近の曲</h4>'+a.map((x,i)=>'<button class="sm" data-r="'+i+'">'+esc(x.name)+'</button>').join(''):''}
 $('recent').onclick=e=>{const b=e.target.closest('[data-r]');if(!b)return;let a=JSON.parse(localStorage.getItem(LS_R)||'[]');const x=a[+b.dataset.r];if(x)load(x.json)};
@@ -315,12 +325,28 @@ $('oLink').onclick=async()=>{if(!SRC)return;const j=Object.assign({},SRC);const 
   if(url.length>6000){say('この曲は長いので、リンクが長くなります（'+url.length+'文字）。うまく開けないときは「PDF」か「JSON」で共有してください','er')}
   try{if(navigator.share){await navigator.share({title:SONG.name,url});return}}catch(e){if(e&&e.name==='AbortError')return}
   try{await navigator.clipboard.writeText(url);say('リンクをコピーしました（'+url.length+'文字）','ok')}catch(e){prompt('このリンクをコピーしてください',url)}};
+// ===================== music-suite とつなぐ（同じ曲が、どちらからでも見える）=====================
+// ・同じブラウザなら localStorage の msuite_projects を共有（曲の一覧が同じになる）
+// ・別の保存場所（iPhoneのホーム画面アプリ同士など）でも、#import= のリンクで曲そのものを送れる
+const MS_KEY='msuite_projects',SUITE_ICON={'vocal-lab':'🎤','chord-lab':'🎹','beat-lab':'🥁','score-editor':'🎼','lead-sheet':'📄'};
+function suiteURL(p){return location.origin+'/music-suite/'+(p||'')}
+function msLoad(){try{const a=JSON.parse(localStorage.getItem(MS_KEY)||'[]');return Array.isArray(a)?a:[]}catch(e){return[]}}
+function msName(p){return p&&(p.name||p.projectName)||'無題'}
+function msRegister(json){try{if(!json||typeof json!=='object'||Array.isArray(json))return;const a=msLoad(),nm=msName(json),src=json.source||'lead-sheet';
+  const j=Object.assign({},json,{name:nm,source:src,updatedAt:new Date().toISOString()});const i=a.findIndex(x=>msName(x)===nm&&(x.source||'')===src);if(i>=0)a[i]=j;else a.push(j);localStorage.setItem(MS_KEY,JSON.stringify(a))}catch(e){}}
+function canShow(p){try{const S=normalize(p);return S.mel.length>0||S.secs.some(s=>s.chords.length)}catch(e){return false}}
+function drawSuite(){const a=msLoad().map((p,i)=>({p,i})).filter(x=>canShow(x.p));
+  $('suiteList').innerHTML=a.length?'<h4>🎹 music-suite の曲（タップで楽譜に）</h4>'+a.slice().reverse().slice(0,30).map(x=>'<button class="sm" data-m="'+x.i+'">'+(SUITE_ICON[x.p.source]||'📄')+' '+esc(msName(x.p))+'</button>').join(''):'';}
+$('suiteList').onclick=e=>{const b=e.target.closest('[data-m]');if(!b)return;const p=msLoad()[+b.dataset.m];if(p)load(p,'suite')};
+function b64of(j){return encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(j)))))}
+function sendTo(path){if(!SRC)return;const j=Object.assign({},SRC);if(!j.source||j.source==='demo')j.source='lead-sheet';j.name=SONG.name;const url=suiteURL(path)+'#import='+b64of(j);if(url.length>60000){say('曲が大きすぎて、リンクで送れません。「JSON」で渡してください','er');return}msRegister(j);location.href=url}
+$('oSuite').onclick=()=>sendTo('');$('oChord').onclick=()=>sendTo('apps/chord-lab.html');$('oScore').onclick=()=>sendTo('apps/score-editor-v2.html');
 // ---- 起動 ----
 const DEMO={version:'1.0',source:'demo',name:'きらきら星（サンプル）',bpm:100,key:'C',timeSig:4,
  melody:{notes:(()=>{const m=[[60,1],[60,1],[67,1],[67,1],[69,1],[69,1],[67,2],[65,1],[65,1],[64,1],[64,1],[62,1],[62,1],[60,2],[67,1],[67,1],[65,1],[65,1],[64,1],[64,1],[62,2],[67,1],[67,1],[65,1],[65,1],[64,1],[64,1],[62,2],[60,1],[60,1],[67,1],[67,1],[69,1],[69,1],[67,2],[65,1],[65,1],[64,1],[64,1],[62,1],[62,1],[60,2]];let t=0;return m.map(([p,d])=>{const n={pitch:p,startBeat:t,durationBeats:d,vel:80};t+=d;return n})})()},
  chords:{key:'C',sections:[{tag:'A',progression:[{chord:'C',beats:4},{chord:'F',beats:2},{chord:'C',beats:2},{chord:'F',beats:2},{chord:'C',beats:2},{chord:'G7',beats:4},{chord:'C',beats:4},{chord:'G7',beats:4},{chord:'C',beats:4},{chord:'G7',beats:4},{chord:'C',beats:4}]}]}};
 window.__ls={normalize,buildBars,render,toMusicXML,load,songFromChordText,spell,transposedKey,chordText};
-(function(){drawRecent();
+(function(){drawRecent();drawSuite();
   const h=location.hash||'';const m=h.match(/import=([^&]+)/);const t=h.match(/tr=(-?\d+)/);
   if(m){try{const json=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));load(json);if(t){TR=+t[1];show()}history.replaceState(null,'',location.pathname);return}catch(e){say('共有リンクを読み込めませんでした','er')}}
   try{const last=localStorage.getItem(LS_LAST);if(last)load(JSON.parse(last))}catch(e){}

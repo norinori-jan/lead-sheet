@@ -29,7 +29,8 @@ textarea{min-height:110px;font-family:ui-monospace,Menlo,monospace;font-size:14p
   #printArea{display:block!important}#printArea svg{width:100%;height:auto}
 }
 </style></head><body>
-<header><b>🎼 lead-sheet</b><a href="../music-suite/" id="aSuite" style="text-decoration:none"><button class="sm" type="button">🎹 music-suite</button></a><button class="sm" id="bHelp">使い方</button></header>
+<header><b>🎼 lead-sheet</b><a href="../music-suite/" id="aSuite" style="text-decoration:none"><button class="sm" type="button">🎹 music-suite</button></a><button class="sm" id="bSync" title="曲の同期">☁</button><button class="sm" id="bHelp">使い方</button></header>
+<div id="syncCard" class="card" hidden style="font-size:13px;color:var(--dim);line-height:1.7"><b style="color:var(--tx)">☁ 曲の同期（music-suite と同じ設定）</b><br>端末をまたいで、曲の一覧を合わせます。新しい方を残して合体するので、上書きで消えることはありません。<br><input type="text" id="syEp" placeholder="https://sync-worker.xxxx.workers.dev" autocomplete="off" style="margin:8px 0 6px"><input type="password" id="syTk" placeholder="トークン（チャットには貼らないでください）" autocomplete="off"><div class="row" style="margin-top:8px"><button class="pri sm" id="syGo">保存して同期</button><span id="syMsg" style="font-size:12px"></span></div></div>
 
 <div id="help" class="card" hidden style="font-size:13px;line-height:1.8;color:var(--dim)">
 <b style="color:var(--tx)">楽譜を打ち出して共有する</b><br>
@@ -65,6 +66,46 @@ textarea{min-height:110px;font-family:ui-monospace,Menlo,monospace;font-size:14p
 </div>
 <div id="printArea"></div>
 
+<script>
+/* ── music-suite 連携：曲の一覧（msuite_projects / msuite_works）の登録・クラウド同期（マージ方式）──
+   ・同じ名前＋同じ種類の曲は上書き登録（増えません）
+   ・同期は「合体」：新しい方を残し、削除した曲は戻りません（上書きで消えることはありません） */
+var MS_P='msuite_projects',MS_W='msuite_works',MS_D='msuite_deleted',MS_EP='msuite_sync_endpoint',MS_TK='msuite_sync_token',MS_LAST='msuite_last_sync';
+function msJ(k,d){try{var v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}}
+function msSet(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+function msSrc(p){return p.source||(p.cards?'vocal-lab':(p.melody||p.bass)?'score-editor':p.chords?'chord-lab':p.drums?'beat-lab':'unknown')}
+function msKeyP(p){return 'p:'+msSrc(p)+'\u0001'+(p.name||p.projectName||'無題')}
+function msTs(p){return Date.parse(p&&(p.updatedAt||p.exported||p.createdAt))||0}
+function msTomb(key){var d=msJ(MS_D,{});d[key]=Date.now();msSet(MS_D,d);if(typeof msSyncSoon==='function')msSyncSoon()}
+function msRegister(d){try{if(!d||typeof d!=='object'||Array.isArray(d))return;var a=msJ(MS_P,[]);if(!Array.isArray(a))a=[];
+  var nm=d.name||d.projectName||'無題',src=d.source||'unknown',j=Object.assign({},d,{name:nm,source:src,updatedAt:new Date().toISOString()});
+  var i=a.findIndex(function(x){return (x.name||x.projectName||'無題')===nm&&msSrc(x)===src});if(i>=0)a[i]=j;else a.push(j);msSet(MS_P,a);msSyncSoon()}catch(e){}}
+function msSheet(d){if(!d)return;msRegister(d);var u=location.origin+'/lead-sheet/#import='+encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(d)))));if(u.length>60000){alert('曲が大きすぎて、リンクで送れません。JSONで渡してください');return}location.href=u}
+function msMerge(L,R){
+  var dead=Object.assign({},R.deleted||{});var ld=L.deleted||{};Object.keys(ld).forEach(function(k){dead[k]=Math.max(dead[k]||0,ld[k])});
+  var map={};(R.projects||[]).concat(L.projects||[]).forEach(function(p){if(!p||typeof p!=='object')return;var k=msKeyP(p),o=map[k];if(!o||msTs(p)>=msTs(o))map[k]=p});
+  var projects=Object.keys(map).filter(function(k){return !(dead[k]&&dead[k]>=msTs(map[k]))}).map(function(k){return map[k]});
+  var wm={};(R.works||[]).concat(L.works||[]).forEach(function(w){if(!w||!w.id)return;var o=wm[w.id];
+    if(!o){wm[w.id]=Object.assign({},w);return}
+    var nw=(Date.parse(w.updatedAt||w.createdAt)||0)>=(Date.parse(o.updatedAt||o.createdAt)||0)?w:o;var m=Object.assign({},nw);
+    var seen={},secs=[];(o.sections||[]).concat(w.sections||[]).forEach(function(s){var k=s.type+'\u0001'+s.label;if(!seen[k]){seen[k]=1;secs.push(s)}});m.sections=secs;wm[w.id]=m});
+  var works=Object.keys(wm).filter(function(id){var t=dead['w:'+id];return !(t&&t>=(Date.parse(wm[id].createdAt)||0))}).map(function(id){return wm[id]});
+  return{works:works,projects:projects,deleted:dead}}
+var msBusy=false,msTimer=null;
+function msCfg(){var ep=(localStorage.getItem(MS_EP)||'').trim().replace(/\/$/,''),tk=(localStorage.getItem(MS_TK)||'').trim();return ep&&tk?{ep:ep,tk:tk}:null}
+async function msSyncNow(){var c=msCfg();if(!c)return{ok:false,msg:'同期の設定がありません'};if(msBusy)return{ok:false,msg:'同期中です'};msBusy=true;
+  try{var au={Authorization:'Bearer '+c.tk},r=await fetch(c.ep+'/sync/music-suite',{headers:au});
+    if(r.status===401||r.status===403)throw new Error('トークンが違います('+r.status+')');
+    var remote={works:[],projects:[],deleted:{}};
+    if(r.status!==404){if(!r.ok)throw new Error('受信に失敗('+r.status+')');var j=await r.json();if(j&&j.data){remote={works:j.data.works||[],projects:j.data.projects||[],deleted:j.data.deleted||{}}}}
+    var local={works:msJ(MS_W,[]),projects:msJ(MS_P,[]),deleted:msJ(MS_D,{})};
+    var m=msMerge(local,remote);msSet(MS_W,m.works);msSet(MS_P,m.projects);msSet(MS_D,m.deleted);
+    var same=JSON.stringify(msMerge(remote,remote))===JSON.stringify(m);
+    if(!same||r.status===404){var pr=await fetch(c.ep+'/sync/music-suite',{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},au),body:JSON.stringify({data:m})});if(!pr.ok)throw new Error('送信に失敗('+pr.status+')')}
+    localStorage.setItem(MS_LAST,String(Date.now()));return{ok:true,works:m.works.length,projects:m.projects.length}}
+  catch(e){return{ok:false,msg:String(e&&e.message||e)}}finally{msBusy=false}}
+function msSyncSoon(){if(!msCfg())return;clearTimeout(msTimer);msTimer=setTimeout(function(){msSyncNow().then(function(r){if(typeof msAfterSync==='function')msAfterSync(r)})},1500)}
+</script>
 <script>
 (function(){
 'use strict';
@@ -298,7 +339,7 @@ function show(){
   const px=Math.round(W);const r=render(SONG,TR,px<420?420:px,{title:true});
   $('paper').innerHTML=r.svg;
   say(r.bars+'小節 ／ '+(SONG.mel.length?'メロディ '+SONG.mel.length+'音':'コードのみ')+(SONG.secs.length&&SONG.secs[0].chords.length?' ／ コード '+SONG.secs.reduce((a,s)=>a+s.chords.length,0)+'個':''),'ok')}
-function load(json,src){try{const S=normalize(json);if(!S.mel.length&&!S.secs.length)throw new Error('メロディもコードも見つかりません');SONG=S;SRC=json;TR=0;try{localStorage.setItem(LS_LAST,JSON.stringify(json))}catch(e){}rec(S.name,json);if(src!=='suite')msRegister(Object.assign({},json,{name:json.name||json.title||S.name}));drawSuite();show();$('inBox').hidden=true}catch(e){say('読み込めませんでした：'+(e.message||e),'er')}}
+function load(json,src){try{const S=normalize(json);if(!S.mel.length&&!S.secs.length)throw new Error('メロディもコードも見つかりません');SONG=S;SRC=json;TR=0;try{localStorage.setItem(LS_LAST,JSON.stringify(json))}catch(e){}rec(S.name,json);if(src!=='suite')msRegister(Object.assign({source:'lead-sheet'},json,{name:json.name||json.title||S.name}));drawSuite();show();$('inBox').hidden=true}catch(e){say('読み込めませんでした：'+(e.message||e),'er')}}
 function rec(name,json){try{let a=JSON.parse(localStorage.getItem(LS_R)||'[]');a=a.filter(x=>x.name!==name);a.unshift({name,json,at:Date.now()});a=a.slice(0,8);localStorage.setItem(LS_R,JSON.stringify(a));drawRecent()}catch(e){}}
 function drawRecent(){let a=[];try{a=JSON.parse(localStorage.getItem(LS_R)||'[]')}catch(e){}$('recent').innerHTML=a.length?'<h4>最近の曲</h4>'+a.map((x,i)=>'<button class="sm" data-r="'+i+'">'+esc(x.name)+'</button>').join(''):''}
 $('recent').onclick=e=>{const b=e.target.closest('[data-r]');if(!b)return;let a=JSON.parse(localStorage.getItem(LS_R)||'[]');const x=a[+b.dataset.r];if(x)load(x.json)};
@@ -332,8 +373,6 @@ const MS_KEY='msuite_projects',SUITE_ICON={'vocal-lab':'🎤','chord-lab':'🎹'
 function suiteURL(p){return location.origin+'/music-suite/'+(p||'')}
 function msLoad(){try{const a=JSON.parse(localStorage.getItem(MS_KEY)||'[]');return Array.isArray(a)?a:[]}catch(e){return[]}}
 function msName(p){return p&&(p.name||p.projectName)||'無題'}
-function msRegister(json){try{if(!json||typeof json!=='object'||Array.isArray(json))return;const a=msLoad(),nm=msName(json),src=json.source||'lead-sheet';
-  const j=Object.assign({},json,{name:nm,source:src,updatedAt:new Date().toISOString()});const i=a.findIndex(x=>msName(x)===nm&&(x.source||'')===src);if(i>=0)a[i]=j;else a.push(j);localStorage.setItem(MS_KEY,JSON.stringify(a))}catch(e){}}
 function canShow(p){try{const S=normalize(p);return S.mel.length>0||S.secs.some(s=>s.chords.length)}catch(e){return false}}
 function drawSuite(){const a=msLoad().map((p,i)=>({p,i})).filter(x=>canShow(x.p));
   $('suiteList').innerHTML=a.length?'<h4>🎹 music-suite の曲（タップで楽譜に）</h4>'+a.slice().reverse().slice(0,30).map(x=>'<button class="sm" data-m="'+x.i+'">'+(SUITE_ICON[x.p.source]||'📄')+' '+esc(msName(x.p))+'</button>').join(''):'';}
@@ -341,6 +380,12 @@ $('suiteList').onclick=e=>{const b=e.target.closest('[data-m]');if(!b)return;con
 function b64of(j){return encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(j)))))}
 function sendTo(path){if(!SRC)return;const j=Object.assign({},SRC);if(!j.source||j.source==='demo')j.source='lead-sheet';j.name=SONG.name;const url=suiteURL(path)+'#import='+b64of(j);if(url.length>60000){say('曲が大きすぎて、リンクで送れません。「JSON」で渡してください','er');return}msRegister(j);location.href=url}
 $('oSuite').onclick=()=>sendTo('');$('oChord').onclick=()=>sendTo('apps/chord-lab.html');$('oScore').onclick=()=>sendTo('apps/score-editor-v2.html');
+// ---- 曲の同期（music-suite と共通の設定・合体方式）----
+window.msAfterSync=function(r){if(r&&r.ok)drawSuite()};
+$('bSync').onclick=()=>{$('syncCard').hidden=!$('syncCard').hidden;try{$('syEp').value=localStorage.getItem('msuite_sync_endpoint')||'';$('syTk').value=localStorage.getItem('msuite_sync_token')||''}catch(e){}};
+$('syGo').onclick=async()=>{try{localStorage.setItem('msuite_sync_endpoint',$('syEp').value.trim().replace(/\/$/,''));localStorage.setItem('msuite_sync_token',$('syTk').value.trim())}catch(e){}
+  $('syMsg').textContent='同期中…';const r=await msSyncNow();$('syMsg').textContent=r.ok?'✓ 同期しました（曲 '+r.projects+'件）':'✗ '+r.msg;drawSuite()};
+if(msCfg())msSyncNow().then(r=>{if(r.ok)drawSuite()});
 // ---- 起動 ----
 const DEMO={version:'1.0',source:'demo',name:'きらきら星（サンプル）',bpm:100,key:'C',timeSig:4,
  melody:{notes:(()=>{const m=[[60,1],[60,1],[67,1],[67,1],[69,1],[69,1],[67,2],[65,1],[65,1],[64,1],[64,1],[62,1],[62,1],[60,2],[67,1],[67,1],[65,1],[65,1],[64,1],[64,1],[62,2],[67,1],[67,1],[65,1],[65,1],[64,1],[64,1],[62,2],[60,1],[60,1],[67,1],[67,1],[69,1],[69,1],[67,2],[65,1],[65,1],[64,1],[64,1],[62,1],[62,1],[60,2]];let t=0;return m.map(([p,d])=>{const n={pitch:p,startBeat:t,durationBeats:d,vel:80};t+=d;return n})})()},

@@ -29,7 +29,7 @@ textarea{min-height:110px;font-family:ui-monospace,Menlo,monospace;font-size:14p
   #printArea{display:block!important}#printArea svg{width:100%;height:auto}
 }
 </style></head><body>
-<header><b>🎼 lead-sheet</b><a href="../music-suite/" id="aSuite" style="text-decoration:none"><button class="sm" type="button">🎹 music-suite</button></a><button class="sm" id="bSync" title="曲の同期">☁</button><button class="sm" id="bHelp">使い方</button></header>
+<header><b>🎼 lead-sheet</b><a href="../music-suite/apps/compose-spark.html" style="text-decoration:none"><button class="sm" type="button">✨ ひらめき</button></a><a href="../music-suite/" id="aSuite" style="text-decoration:none"><button class="sm" type="button">🎹 music-suite</button></a><button class="sm" id="bSync" title="曲の同期">☁</button><button class="sm" id="bHelp">使い方</button></header>
 <div id="syncCard" class="card" hidden style="font-size:13px;color:var(--dim);line-height:1.7"><b style="color:var(--tx)">☁ 曲の同期（music-suite と同じ設定）</b><br>端末をまたいで、曲の一覧を合わせます。新しい方を残して合体するので、上書きで消えることはありません。<br><input type="text" id="syEp" placeholder="https://sync-worker.xxxx.workers.dev" autocomplete="off" style="margin:8px 0 6px"><input type="password" id="syTk" placeholder="トークン（チャットには貼らないでください）" autocomplete="off"><div class="row" style="margin-top:8px"><button class="pri sm" id="syGo">保存して同期</button><span id="syMsg" style="font-size:12px"></span></div></div>
 
 <div id="help" class="card" hidden style="font-size:13px;line-height:1.8;color:var(--dim)">
@@ -369,7 +369,7 @@ $('oLink').onclick=async()=>{if(!SRC)return;const j=Object.assign({},SRC);const 
 // ===================== music-suite とつなぐ（同じ曲が、どちらからでも見える）=====================
 // ・同じブラウザなら localStorage の msuite_projects を共有（曲の一覧が同じになる）
 // ・別の保存場所（iPhoneのホーム画面アプリ同士など）でも、#import= のリンクで曲そのものを送れる
-const MS_KEY='msuite_projects',SUITE_ICON={'vocal-lab':'🎤','chord-lab':'🎹','beat-lab':'🥁','score-editor':'🎼','lead-sheet':'📄'};
+const MS_KEY='msuite_projects',SUITE_ICON={'vocal-lab':'🎤','chord-lab':'🎹','beat-lab':'🥁','score-editor':'🎼','lead-sheet':'📄','compose-spark':'✨'};
 function suiteURL(p){return location.origin+'/music-suite/'+(p||'')}
 function msLoad(){try{const a=JSON.parse(localStorage.getItem(MS_KEY)||'[]');return Array.isArray(a)?a:[]}catch(e){return[]}}
 function msName(p){return p&&(p.name||p.projectName)||'無題'}

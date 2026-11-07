@@ -60,7 +60,7 @@ textarea{min-height:110px;font-family:ui-monospace,Menlo,monospace;font-size:14p
 <div id="paper" hidden></div>
 <div class="card" id="outCard" hidden style="margin-top:12px">
   <h4>② 打ち出す・共有する</h4>
-  <div class="row"><button class="pri" id="oPrint">🖨 PDF・印刷</button><button id="oPng">🖼 画像で保存</button><button id="oXml">🎹 MusicXML</button><button id="oLink">🔗 共有リンク</button><button id="oJson">{ } JSON</button></div>
+  <div class="row"><button class="pri" id="oPrint">🖨 PDF・印刷</button><button id="oPng">🖼 画像で保存</button><button id="oXml">🎹 MusicXML</button><button id="oLink">🔗 共有リンク</button><button id="oJson">{ } JSON</button><button id="oTable">▦ table-padで制作表にする</button></div>
   <h4 style="margin-top:12px">③ music-suite につなぐ</h4>
   <div class="row"><button id="oSuite">🎹 music-suite に送る</button><button id="oChord">🎸 chord-lab で直す</button><button id="oScore">🎼 score-editor で続ける</button></div>
 </div>
@@ -380,6 +380,24 @@ $('suiteList').onclick=e=>{const b=e.target.closest('[data-m]');if(!b)return;con
 function b64of(j){return encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(j)))))}
 function sendTo(path){if(!SRC)return;const j=Object.assign({},SRC);if(!j.source||j.source==='demo')j.source='lead-sheet';j.name=SONG.name;const url=suiteURL(path)+'#import='+b64of(j);if(url.length>60000){say('曲が大きすぎて、リンクで送れません。「JSON」で渡してください','er');return}msRegister(j);location.href=url}
 $('oSuite').onclick=()=>sendTo('');$('oChord').onclick=()=>sendTo('apps/chord-lab.html');$('oScore').onclick=()=>sendTo('apps/score-editor-v2.html');
+$('oTable').onclick=()=>{
+  if(!SRC||!SONG)return;
+  const rows=[['区分','項目','内容','値']];
+  rows.push(['曲','曲名',SONG.name,'']);
+  rows.push(['曲','プロジェクトID',SRC.projectId||'未設定','']);
+  rows.push(['曲','BPM',String(SONG.bpm),'']);
+  rows.push(['曲','Key',SONG.key,'']);
+  rows.push(['曲','拍子',String(SONG.ts||4),'']);
+  (SRC.chords&&SRC.chords.sections||[]).forEach((s,i)=>{
+    (s.progression||[]).forEach((ch,j)=>rows.push(['コード',s.tag||('Section '+(i+1)),String(ch.chord||ch.name||''),String(ch.beats||4)+'拍']));
+  });
+  (SRC.melody&&SRC.melody.notes||[]).forEach((n,i)=>rows.push(['メロディ','音符 '+(i+1),String(n.pitch),String(n.startBeat??n.start??0)+'拍目 / '+String(n.durationBeats??n.duration??1)+'拍']));
+  const payload={op:'table',title:SONG.name+' - 制作データ',rows};
+  const encoded=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(payload)))));
+  const url=location.origin+'/table-pad/#import='+encoded;
+  if(url.length>60000){say('データが大きすぎます。JSONで共有してください','er');return}
+  location.href=url;
+};
 // ---- 曲の同期（music-suite と共通の設定・合体方式）----
 window.msAfterSync=function(r){if(r&&r.ok)drawSuite()};
 $('bSync').onclick=()=>{$('syncCard').hidden=!$('syncCard').hidden;try{$('syEp').value=localStorage.getItem('msuite_sync_endpoint')||'';$('syTk').value=localStorage.getItem('msuite_sync_token')||''}catch(e){}};
